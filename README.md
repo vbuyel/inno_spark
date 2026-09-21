@@ -23,7 +23,7 @@ flowchart TD
 
     subgraph Tasks ["practice/tasks/"]
         T1["SparkTask1\n(Movie count by category)"]
-        T2["SparkTask2\n(Stub)"]
+        T2["SparkTask2\n(Top 10 actors by total rentals)"]
         TN["SparkTask3 .. SparkTask7\n(Stubs)"]
     end
 
@@ -44,6 +44,7 @@ flowchart TD
 
     PG -->|JDBC Read\norg.postgresql:postgresql:42.7.3| ST
     T1 -->|Transform & Write| OUT
+    T2 -->|Transform & Write| OUT
 ```
 
 ---
@@ -72,7 +73,8 @@ The `SparkTask` class serves as the core foundation implementing the **Template 
 - Each task resides in its own module (`task_1.py` through `task_7.py`) and subclasses `SparkTask`.
 - **Decoupled Business Logic**: Subclasses isolate their transformation logic inside their `execute()` implementation.
   - **`SparkTask1`**: Performs a join between `category` and `film_category`, aggregates movie counts per category (`groupBy` + `agg`), sorts results descending by count and ascending by name, and outputs JSON partitions to `.results/task1`.
-  - **`SparkTask2` – `SparkTask7`**: Modular skeleton tasks ready for upcoming analytical operations.
+  - **`SparkTask2`**: Computes the top 10 actors whose films were rented the most. Joins `inventory`, `rental`, `film_actor`, and `actor`, aggregates total rentals per actor (`groupBy("first_name", "last_name")` + `agg(sum(...))`), sorts descending by rental count, limits to top 10, and outputs JSON partitions to `.results/task2`.
+  - **`SparkTask3` – `SparkTask7`**: Modular skeleton tasks ready for upcoming analytical operations.
 - **Package Interface (`__init__.py`)**: Exposes task classes cleanly via `__all__`.
 
 ---
@@ -158,11 +160,12 @@ inno_spark/
     ├── general_cls.py         # SparkTask base class
     ├── db_connection.py       # PostgresConnector class
     ├── .results/              # Generated task results (JSON partitions)
-    │   └── task1/
+    │   ├── task1/
+    │   └── task2/
     └── tasks/                 # Individual task implementations
         ├── __init__.py        # Task exports
         ├── task_1.py          # Task 1: Movie count by category
-        ├── task_2.py          # Task 2 stub
+        ├── task_2.py          # Task 2: Top 10 actors by total rentals
         ├── ...
         └── task_7.py          # Task 7 stub
 ```
