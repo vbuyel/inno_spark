@@ -1,5 +1,13 @@
 import logging
-from tasks.task_1 import SparkTask1
+from tasks import (
+    SparkTask1,
+    SparkTask2,
+    SparkTask3,
+    SparkTask4,
+    SparkTask5,
+    SparkTask6,
+    SparkTask7,
+)
 
 # Configure logging once at the application entrypoint
 logging.basicConfig(
@@ -13,6 +21,12 @@ if __name__ == "__main__":
     logger.info("Starting Spark tasks execution...")
     tasks = [
         SparkTask1(),
+        SparkTask2(),
+        SparkTask3(),
+        SparkTask4(),
+        SparkTask5(),
+        SparkTask6(),
+        SparkTask7(),
     ]
 
     try:

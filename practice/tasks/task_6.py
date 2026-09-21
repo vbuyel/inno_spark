@@ -1,20 +1,9 @@
-from pyspark.sql import SparkSession
-from db_connection import PostgresConnector
+from general_cls import SparkTask
 
 
-def create_spark_session():
-    return SparkSession.builder.appName("Task6").getOrCreate()
+class SparkTask6(SparkTask):
+    def __init__(self) -> None:
+        super().__init__("task6")
 
-def main():
-    conn = PostgresConnector()
-    db_conn = conn.connect()
-    spark = create_spark_session()
-
-    # Spark code
-    
-    spark.stop()
-    db_conn.close()
-    conn.disconnect()
-
-if __name__ == "__main__":
-    main()
+    def execute(self) -> None:
+        pass
