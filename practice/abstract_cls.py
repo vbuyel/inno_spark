@@ -14,6 +14,11 @@ class SparkTask(ABC):
         pass
 
     @abstractmethod
+    def json_inload(self, df: DataFrame, path: str) -> None:
+        """Load a json file into a Spark DataFrame."""
+        pass
+
+    @abstractmethod
     def execute(self) -> None:
         """Execute the main logic of the task using Spark."""
         pass

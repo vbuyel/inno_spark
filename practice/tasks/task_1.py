@@ -34,6 +34,11 @@ class SparkTask1(SparkTask):
                 warnings.filterwarnings("ignore", category=UserWarning, module="pandas")
                 pdf = pd.read_sql(f"SELECT * FROM {table_name}", self.db.conn)
             return self.spark.createDataFrame(pdf)
+    
+    def json_inload(self, df: DataFrame, path: str = None) -> None:
+        if path is None:
+            path = "practice/.results/task1"
+        df.write.mode("overwrite").json(path)
 
     def execute(self) -> None:
         category_df = self.load_table("category")
@@ -47,8 +52,7 @@ class SparkTask1(SparkTask):
             .agg(count("film_id").alias("movie_count"))
             .orderBy(desc("movie_count"), col("category"))
         )
-
-        result_df.show(truncate=False)
+        self.json_inload(result_df)
 
     def close_all(self) -> None:
         self.spark.stop()
