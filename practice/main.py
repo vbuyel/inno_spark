@@ -1,17 +1,26 @@
-from task_1 import main as task_1_main
-from task_2 import main as task_2_main
-from task_3 import main as task_3_main
-from task_4 import main as task_4_main
-from task_5 import main as task_5_main
-from task_6 import main as task_6_main
-from task_7 import main as task_7_main
+from tasks.task_1 import SparkTask1
+# from tasks.task_2 import SparkTask2
+# from tasks.task_3 import SparkTask3
+# from tasks.task_4 import SparkTask4
+# from tasks.task_5 import SparkTask5
+# from tasks.task_6 import SparkTask6
+# from tasks.task_7 import SparkTask7
 
 
 if __name__ == "__main__":
-    task_1_main()
-    task_2_main()
-    task_3_main()
-    task_4_main()
-    task_5_main()
-    task_6_main()
-    task_7_main()
+    tasks = [
+        SparkTask1(),
+        # SparkTask2(),
+        # SparkTask3(),
+        # SparkTask4(),
+        # SparkTask5(),
+        # SparkTask6(),
+        # SparkTask7()
+    ]
+
+    try:
+        for task in tasks:
+            task.execute()
+    finally:
+        for task in tasks:
+            task.close_all()
