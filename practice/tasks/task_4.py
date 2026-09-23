@@ -1,4 +1,4 @@
-from pyspark.sql.functions import col
+from pyspark.sql.functions import broadcast
 from general_cls import SparkTask
 
 
@@ -11,12 +11,17 @@ class SparkTask4(SparkTask):
         super().__init__("task4")
 
     def execute(self) -> None:
-        film_df = self.load_table("film")
-        inventory_df = self.load_table("inventory")
+        """Optimized:
+        - Replaced 'left' join + isNull filter with a 'left_anti' join to short-circuit matching and eliminate unnecessary null row generation and post-filtering.
+        - Applied column projection and deduplication on inventory film IDs.
+        - Used broadcast join on the inventory table to execute an in-memory hash anti-join without shuffling.
+        """
+        film_df = self.load_table("film").select("film_id", "title")
+        inventory_df = self.load_table("inventory").select("film_id").dropDuplicates(["film_id"])
 
         result_df = (
-            film_df.select("film_id", "title")
-            .join(inventory_df.select("film_id", "inventory_id"), on="film_id", how="left")
-            .where(col("inventory_id").isNull())
-        ).select("title")
+            film_df
+            .join(broadcast(inventory_df), on="film_id", how="left_anti")
+            .select("title")
+        )
         self.json_inload(result_df)

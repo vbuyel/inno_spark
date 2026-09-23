@@ -1,4 +1,4 @@
-from pyspark.sql.functions import count, desc, sum
+from pyspark.sql.functions import count, desc, sum, broadcast
 from general_cls import SparkTask
 
 
@@ -11,26 +11,31 @@ class SparkTask2(SparkTask):
         super().__init__("task2")
 
     def execute(self) -> None:
-        rental_df = self.load_table("rental")
-        inventory_df = self.load_table("inventory")
-        actor_df = self.load_table("actor")
-        film_actor_df = self.load_table("film_actor")
+        """Optimized:
+        - Applied column projection pruning on all JDBC tables to minimize I/O and network transfer.
+        - Used broadcast joins on dimension tables ('inventory', 'actor', 'film_actor') to eliminate unnecessary shuffles against the large rental table.
+        - Pre-aggregated rental counts at the film level before joining with actor dimensions to reduce intermediate shuffle volume.
+        """
+        rental_df = self.load_table("rental").select("inventory_id")
+        inventory_df = self.load_table("inventory").select("inventory_id", "film_id")
+        actor_df = self.load_table("actor").select("actor_id", "first_name", "last_name")
+        film_actor_df = self.load_table("film_actor").select("actor_id", "film_id")
         
         inventory_rental_df = (
-            inventory_df
-            .join(rental_df, on="inventory_id", how="inner")
+            rental_df
+            .join(broadcast(inventory_df), on="inventory_id", how="inner")
             .groupBy("film_id")
-            .agg(count("rental_id").alias("rental_count"))
+            .agg(count("*").alias("rental_count"))
         )
 
-        film_actor_renatal_df = (
-            film_actor_df
+        film_actor_rental_df = (
+            broadcast(film_actor_df)
             .join(inventory_rental_df, on="film_id", how="left")
         )
 
         actor_rental_df = (
-            actor_df
-            .join(film_actor_renatal_df, on="actor_id", how="left")
+            broadcast(actor_df)
+            .join(film_actor_rental_df, on="actor_id", how="left")
             .groupBy("first_name", "last_name")
             .agg(sum("rental_count").alias("rental_count"))
             .orderBy(desc("rental_count"))

@@ -1,4 +1,4 @@
-from pyspark.sql.functions import col, count, desc
+from pyspark.sql.functions import col, count, desc, broadcast
 from general_cls import SparkTask
 
 
@@ -11,11 +11,15 @@ class SparkTask1(SparkTask):
         super().__init__("task1")
 
     def execute(self) -> None:
-        category_df = self.load_table("category")
-        film_category_df = self.load_table("film_category")
+        """Optimized:
+        - Applied column projection pruning to read only necessary columns from JDBC.
+        - Used broadcast join on the tiny dimension table 'category' (16 rows) to eliminate shuffle operations.
+        """
+        category_df = self.load_table("category").select("category_id", "name")
+        film_category_df = self.load_table("film_category").select("category_id", "film_id")
 
         result_df = (
-            category_df
+            broadcast(category_df)
             .join(film_category_df, on="category_id", how="left")
             .groupBy(col("name").alias("category"))
             .agg(count("film_id").alias("movie_count"))

@@ -1,4 +1,4 @@
-from pyspark.sql.functions import col, count, desc, when
+from pyspark.sql.functions import col, count, desc, when, broadcast
 from general_cls import SparkTask
 
 
@@ -11,14 +11,18 @@ class SparkTask6(SparkTask):
         super().__init__("task6")
 
     def execute(self) -> None:
+        """Optimized:
+        - Used broadcast joins on dimension tables 'address' (~1k rows) and 'city' (600 rows) to eliminate join shuffle stages.
+        - Maintained selective column projection to avoid pulling unneeded attributes over JDBC.
+        """
         address_df = self.load_table("address").select("address_id", "city_id")
         city_df = self.load_table("city").select("city_id", "city")
         customer_df = self.load_table("customer").select("address_id", "active")
 
         result_df = (
             customer_df
-            .join(address_df, on="address_id")
-            .join(city_df, on="city_id")
+            .join(broadcast(address_df), on="address_id")
+            .join(broadcast(city_df), on="city_id")
             .groupBy("city")
             .agg(
                 count(when(col("active") == 1, 1)).alias("active_customers"),
