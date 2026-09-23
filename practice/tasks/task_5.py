@@ -4,6 +4,10 @@ from general_cls import SparkTask
 
 
 class SparkTask5(SparkTask):
+    """
+    Output the top 3 actors who have appeared most in movies in the “Children” category. If several actors have the same number of movies, output all of them.
+    """
+
     def __init__(self) -> None:
         super().__init__("task5")
 

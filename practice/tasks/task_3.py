@@ -3,6 +3,10 @@ from general_cls import SparkTask
 
 
 class SparkTask3(SparkTask):
+    """
+    Output the category of movies on which the most money was spent. 
+    """
+
     def __init__(self) -> None:
         super().__init__("task3")
 

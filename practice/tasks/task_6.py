@@ -3,6 +3,10 @@ from general_cls import SparkTask
 
 
 class SparkTask6(SparkTask):
+    """
+    Output cities with the number of active and inactive customers (active - customer.active = 1). Sort by the number of inactive customers in descending order.
+    """
+
     def __init__(self) -> None:
         super().__init__("task6")
 

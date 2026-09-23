@@ -3,6 +3,10 @@ from general_cls import SparkTask
 
 
 class SparkTask4(SparkTask):
+    """
+    Output the names of movies that are not in the inventory.
+    """
+
     def __init__(self) -> None:
         super().__init__("task4")
 

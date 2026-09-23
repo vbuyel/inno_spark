@@ -3,6 +3,10 @@ from general_cls import SparkTask
 
 
 class SparkTask1(SparkTask):
+    """
+    Output the number of movies in each category, sorted in descending order.
+    """
+
     def __init__(self) -> None:
         super().__init__("task1")
 
