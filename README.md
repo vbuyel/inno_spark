@@ -28,7 +28,7 @@ flowchart TD
         T4["SparkTask4\n(Movies absent from inventory)"]
         T5["SparkTask5\n(Top 3 actors in 'Children' movies)"]
         T6["SparkTask6\n(Active vs inactive customers per city)"]
-        T7["SparkTask7\n(Top category by rental hours for filtered cities)"]
+        T7["SparkTask7\n(Top category by rental hours for cities starting with 'a')"]
     end
 
     subgraph Output [".results/"]
@@ -38,7 +38,7 @@ flowchart TD
         OUT4["task4/\n(JSON)"]
         OUT5["task5/\n(JSON)"]
         OUT6["task6/\n(JSON)"]
-        OUT7["task7/\n(cities_starting_with_a/\ncities_with_dash/)"]
+        OUT7["task7/\n(JSON)"]
     end
 
     ENV --> PC
@@ -95,15 +95,15 @@ The `SparkTask` class serves as the foundation implementing the **Template Metho
 ### 2.4. Task Implementations (`practice/tasks/`)
 All seven analytical queries are implemented as dedicated modular subclasses of `SparkTask`:
 
-| Module | Goal & Analytical Query | Key Transformations & Spark Logic | Output Path |
-|--------|-------------------------|-----------------------------------|-------------|
-| `task_1.py` | Output the number of movies in each category, sorted descending by count, ascending by category name. | Broadcast join on `category` (16 rows) with `film_category`, `groupBy("name")`, `count("film_id")`, `orderBy(desc("movie_count"), col("category"))`. | `.results/task1` |
-| `task_2.py` | Output the top 10 actors whose movies rented the most, sorted descending. | Pre-aggregate rental counts by `film_id` via broadcast join with `inventory`, join with broadcasted `film_actor` and `actor`, `groupBy("first_name", "last_name")`, `sum("rental_count")`, `limit(10)`. | `.results/task2` |
-| `task_3.py` | Output the category of movies on which the most money was spent. | Multi-table join across `payment`, `rental`, broadcasted `inventory`, `film_category`, and `category`, `groupBy("category")`, `sum("amount")`, `orderBy(desc("total_spent"))`, `limit(1)`. | `.results/task3` |
-| `task_4.py` | Output the titles of movies that are not present in inventory. | `left_anti` join between `film` and deduplicated `inventory` on `film_id` with `broadcast(inventory)`, selecting `title`. | `.results/task4` |
-| `task_5.py` | Output top 3 actors appearing most in "Children" category movies (including all ties). | Filter `category` to `"Children"` pushed down before join, join with `film_category`, `film_actor`, and broadcasted `actor`, window ranking using `dense_rank().over(orderBy(desc("movie_count")))`, filter `place <= 3`. | `.results/task5` |
-| `task_6.py` | Output cities with count of active (`active = 1`) and inactive (`active != 1`) customers, sorted descending by inactive count. | Broadcast joins on `address` and `city` with `customer`, conditional aggregations using `count(when(col("active") == 1, 1))` and `count(when(col("active") != 1, 1))`, `orderBy(desc("inactive_customers"), col("city"))`. | `.results/task6` |
-| `task_7.py` | Output the top movie category by total rental hours for: (1) cities starting with "A"/"a", and (2) cities containing a "-". | Calculate `rental_hours = (return_date - rental_date) / 3600`, broadcast join all dimension tables (`inventory`, `film_category`, `category`, `customer`, `address`, `city`), cache intermediate DataFrame (`.cache()`), rank via `dense_rank()`, export both subsets, and unpersist cache. | `.results/task7/cities_starting_with_a`<br>`.results/task7/cities_with_dash` |
+| Module | Goal & Analytical Query | Key Transformations & Spark Logic | Tables Used | Output Path |
+|--------|-------------------------|-----------------------------------|-------------|-------------|
+| `task_1.py` | Count of movies per category, sorted descending by count then ascending by category name. | `film_category` joined with broadcasted `category`; `groupBy("name")`, `count("film_id")`, `orderBy(desc("movie_count"), col("category"))`. | `category`, `film_category` | `.results/task1` |
+| `task_2.py` | Top 10 actors whose movies rented the most, sorted descending. | `rental` → `inventory` inner join, `groupBy("film_id")` to get rental count per film; broadcast join with `film_actor` and `actor`; `groupBy("first_name", "last_name")`, `sum("rental_count")`, `limit(10)`. | `rental`, `inventory`, `actor`, `film_actor` | `.results/task2` |
+| `task_3.py` | Category of movies on which the most money was spent. | `payment` joined with `rental`, then broadcast-joined with `inventory`, `film_category`, `category`; `groupBy("category")`, `sum("amount")`, `orderBy(desc("total_spent"))`, `limit(1)`. | `payment`, `rental`, `inventory`, `film_category`, `category` | `.results/task3` |
+| `task_4.py` | Titles of movies not present in inventory. | `left_anti` join between `film` and deduplicated `inventory` on `film_id` with `broadcast(inventory)`; selects `title`. | `film`, `inventory` | `.results/task4` |
+| `task_5.py` | Top 3 actors appearing most in "Children" category movies (including all ties). | Filter `category` to `"Children"` pushed down before join; broadcast join with `film_category`, `film_actor`, and `actor`; window ranking using `dense_rank().over(orderBy(desc("movie_count")))`, filter `place <= 3`. | `category`, `film_category`, `film_actor`, `actor` | `.results/task5` |
+| `task_6.py` | Cities with count of active (`active = 1`) and inactive (`active != 1`) customers, sorted descending by inactive count. | Broadcast joins on `address` and `city` with `customer`; conditional aggregations using `count(when(col("active") == 1, 1))` and `count(when(col("active") != 1, 1))`; `orderBy(desc("inactive_customers"), col("city"))`. | `address`, `city`, `customer` | `.results/task6` |
+| `task_7.py` | For each city starting with "a" (case-insensitive), find the movie category with the most rental hours. Marks whether that city also contains a "-". | Cities starting with "a" LEFT JOIN cities containing "-" on `city_id`; broadcast join with `address`, `customer`, `rental`, `inventory`, `film_category`, `category`; `groupBy("city_starts_with_a", "city_with_hyphens", "name")`, `sum("rental_hours")`; `dense_rank()` partitioned by `(city_starts_with_a, city_with_hyphens)`; filter `rank == 1`; `cache()` + `unpersist()`. | `rental`, `inventory`, `film_category`, `category`, `customer`, `address`, `city` | `.results/task7` |
 
 ---
 
@@ -117,35 +117,27 @@ graph LR
         direction TB
         OPT1["Column Projection Pruning\n(Select only required columns from JDBC)"]
         OPT2["Broadcast Hash Joins\n(broadcast() on dimension tables to eliminate shuffles)"]
-        OPT3["Pre-aggregation at Source Grain\n(Aggregate before multi-table joins in Task 2)"]
-        OPT4["Native Left-Anti Joins\n(Short-circuit join instead of left outer + null check)"]
+        OPT3["Pre-aggregation at Source Grain\n(Aggregate rental counts at film level before actor join in Task 2)"]
+        OPT4["Native Left-Anti Joins\n(Short-circuit join instead of left outer + null check in Task 4)"]
         OPT5["Predicate Pushdown\n(Filter small dimensions before joins in Task 5)"]
-        OPT6["DataFrame Caching & Lifecycle\n(Cache shared multi-table join and unpersist in Task 7)"]
+        OPT6["DataFrame Caching & Lifecycle\n(Cache shared 7-table join, unpersist after use in Task 7)"]
+        OPT7["Partitioned Window Functions\n(partitionBy in Window to avoid global single-partition shuffle in Task 7)"]
     end
 ```
 
-1. **Column Projection Pruning**:
-   - Rather than pulling full table schemas over JDBC, queries immediately prune columns upon reading (e.g., `self.load_table("film").select("film_id", "title")`).
-   - Drastically cuts down PostgreSQL JDBC serialization overhead, network bandwidth consumption, and Spark executor memory footprint.
+1. **Column Projection Pruning**: All `load_table()` calls are immediately followed by `.select(...)` to pull only required columns over JDBC, reducing serialization overhead and executor memory footprint.
 
-2. **Broadcast Hash Joins (`broadcast`)**:
-   - Small dimension tables (`category`, `actor`, `inventory`, `film_category`, `address`, `city`) are explicitly wrapped with `broadcast()`.
-   - Replaces expensive distributed `SortMergeJoin` (which requires hashing and shuffling large datasets across executors) with fast, local in-memory hash lookups.
+2. **Broadcast Hash Joins (`broadcast`)**: Small dimension tables (`category`, `actor`, `inventory`, `film_category`, `address`, `city`) are explicitly wrapped with `broadcast()`. Replaces expensive distributed `SortMergeJoin` with fast local in-memory hash lookups.
 
-3. **Pre-aggregation at Source Grain (Task 2)**:
-   - In Task 2, `rental` is joined with `inventory` and aggregated by `film_id` before joining with `film_actor` and `actor`.
-   - Prevents multiplying millions of intermediate rows through the 4-way join before grouping.
+3. **Pre-aggregation at Source Grain (Task 2)**: `rental` is joined with `inventory` and aggregated by `film_id` before joining with `film_actor` and `actor`. This prevents row multiplication from the many-to-many `film_actor` relationship inflating the intermediate dataset.
 
-4. **Native Left-Anti Joins (Task 4)**:
-   - Replaced conventional `left` join followed by `.where(col(...).isNull())` with PySpark's native `how="left_anti"` join against deduplicated inventory film IDs.
-   - Spark executes this as an optimized broadcast anti-hash join, skipping unnecessary column allocations and null-filtering passes.
+4. **Native Left-Anti Joins (Task 4)**: Replaced conventional `left` join followed by `.where(col(...).isNull())` with PySpark's native `how="left_anti"` join against deduplicated inventory film IDs. Spark executes this as an optimized broadcast anti-hash join.
 
-5. **Predicate Pushdown & Broadcast Filtering (Task 5)**:
-   - Pushes down the `"Children"` category filter directly onto the 16-row `category` table before joining, broadcasting a 1-row DataFrame that prunes rows early in the pipeline.
+5. **Predicate Pushdown & Broadcast Filtering (Task 5)**: The `"Children"` category filter is pushed directly onto the 16-row `category` table before joining, broadcasting a 1-row DataFrame that prunes rows early in the pipeline.
 
-6. **In-Memory DataFrame Caching & Lifecycle Management (Task 7)**:
-   - Task 7 requires computing two analytical cuts (cities starting with "A" and cities containing "-") across a 7-table joined pipeline.
-   - The joined base DataFrame is cached in memory via `.cache()`, avoiding double-evaluation of the 7-table join. Once both JSON outputs are written, `.unpersist()` is immediately invoked to release memory.
+6. **In-Memory DataFrame Caching & Lifecycle Management (Task 7)**: The 7-table joined base DataFrame is cached via `.cache()` to serve both the aggregation and ranking steps without re-evaluation, then immediately released with `.unpersist()`.
+
+7. **Partitioned Window Functions (Task 7)**: `dense_rank()` uses `Window.partitionBy("city_starts_with_a", "city_with_hyphens")` instead of a global `Window.orderBy(...)`, which avoids collapsing all data into a single executor partition and eliminates the `WindowExec` performance warning.
 
 ---
 
@@ -244,15 +236,13 @@ inno_spark/
     ├── general_cls.py         # SparkTask base class (Template Method)
     ├── db_connection.py       # PostgresConnector class
     ├── .results/              # Output directory for exported JSON partitions
-    │   ├── task1/             # Task 1 output
-    │   ├── task2/             # Task 2 output
-    │   ├── task3/             # Task 3 output
-    │   ├── task4/             # Task 4 output
-    │   ├── task5/             # Task 5 output
-    │   ├── task6/             # Task 6 output
-    │   └── task7/             # Task 7 output
-    │       ├── cities_starting_with_a/
-    │       └── cities_with_dash/
+    │   ├── task1/             # Task 1 output: movie count by category
+    │   ├── task2/             # Task 2 output: top 10 actors by total rentals
+    │   ├── task3/             # Task 3 output: top spending movie category
+    │   ├── task4/             # Task 4 output: movies absent from inventory
+    │   ├── task5/             # Task 5 output: top 3 actors in "Children" movies
+    │   ├── task6/             # Task 6 output: active/inactive customers per city
+    │   └── task7/             # Task 7 output: top rental-hours category per 'a'-city
     └── tasks/                 # Individual task implementations
         ├── __init__.py        # Exposes SparkTask1 through SparkTask7
         ├── task_1.py          # Movie count by category
@@ -261,7 +251,8 @@ inno_spark/
         ├── task_4.py          # Movies absent from inventory
         ├── task_5.py          # Top 3 actors in "Children" movies (dense rank)
         ├── task_6.py          # Active and inactive customer counts per city
-        └── task_7.py          # Highest rental hours category for filtered cities
+        └── task_7.py          # Top rental-hours category for cities starting with 'a',
+                               # with hyphen flag via LEFT JOIN
 ```
 
 ---
