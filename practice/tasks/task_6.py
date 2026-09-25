@@ -22,12 +22,12 @@ class SparkTask6(SparkTask):
         result_df = (
             customer_df
             .join(broadcast(address_df), on="address_id")
-            .join(broadcast(city_df), on="city_id")
-            .groupBy("city")
+            .groupBy("city_id")
             .agg(
                 count(when(col("active") == 1, 1)).alias("active_customers"),
                 count(when(col("active") != 1, 1)).alias("inactive_customers"),
             )
+            .join(broadcast(city_df), on="city_id")
             .orderBy(desc("inactive_customers"), col("city"))
         )
         self.json_inload(result_df)

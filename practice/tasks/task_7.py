@@ -12,10 +12,10 @@ class SparkTask7(SparkTask):
         super().__init__("task7")
 
     def execute(self) -> None:
-        """Optimized:
-        - Applied broadcast joins on all dimension tables ('inventory', 'film_category', 'category', 'customer', 'address', 'city') to eliminate shuffle stages against the large rental table.
-        - Pruned intermediate columns down to only ('name', 'city', 'rental_hours') before downstream processing.
-        - Cached the joined base DataFrame in memory to eliminate duplicate execution of the 7-table pipeline across multiple outputs, and unpersisted when finished.
+        """Optimizations:
+        - Column projection pruning on all JDBC reads.
+        - Broadcast joins on all small dimension tables to avoid shuffle stages.
+        - cache() on the joined base DataFrame to avoid recomputing the 7-table pipeline.
         """
         rental_df = (
             self.load_table("rental")
@@ -29,46 +29,51 @@ class SparkTask7(SparkTask):
         address_df = self.load_table("address").select("address_id", "city_id")
         city_df = self.load_table("city").select("city_id", "city")
 
-        # Build joined DataFrame with broadcast dimension hints and cache to prevent re-computation
+        cities_a_df = (
+            city_df
+            .where(col("city").rlike("(?i)^a"))
+            .select(col("city_id"), col("city").alias("city_starts_with_a"))
+        )
+        cities_hyphen_df = (
+            city_df
+            .where(col("city").contains("-"))
+            .select(col("city_id"), col("city").alias("city_with_hyphens"))
+        )
+
+        # city_starts_with_a | city_with_hyphens | city_id
+        cities_df = cities_a_df.join(
+            cities_hyphen_df, on="city_id", how="full"
+        )
+
+        # city_starts_with_a | city_with_hyphens | name | rental_hours
         rental_hours_df = (
             rental_df
-            .withColumn("rental_hours", (col("return_date").cast("long") - col("rental_date").cast("long")) / 3600)
+            .withColumn(
+                "rental_hours",
+                (col("return_date").cast("long") - col("rental_date").cast("long")) / 3600,
+            )
             .join(broadcast(inventory_df), on="inventory_id")
             .join(broadcast(film_category_df), on="film_id")
             .join(broadcast(category_df), on="category_id")
             .join(broadcast(customer_df), on="customer_id")
             .join(broadcast(address_df), on="address_id")
-            .join(broadcast(city_df), on="city_id")
-            .select("name", "city", "rental_hours")
+            .join(broadcast(cities_df), on="city_id")
+            .select("city_starts_with_a", "city_with_hyphens", "name", "rental_hours")
         ).cache()
 
-        ranking_window = Window.orderBy(desc("total_rental_hours"))
+        ranking_window = Window.partitionBy(
+            "city_starts_with_a", "city_with_hyphens"
+        ).orderBy(desc("total_rental_hours"))
 
-        def top_category_by_city_filter(df, filter_condition, label):
-            result_df = (
-                df
-                .filter(filter_condition)
-                .groupBy("name")
-                .agg(sum("rental_hours").alias("total_rental_hours"))
-                .withColumn("rank", dense_rank().over(ranking_window))
-                .filter(col("rank") == 1)
-                .drop("rank")
-            )
-            self.json_inload(result_df, path=f"practice/.results/task7/{label}")
-
-        # Cities starting with letter "a" (case-insensitive)
-        top_category_by_city_filter(
-            rental_hours_df,
-            col("city").startswith("a") | col("city").startswith("A"),
-            label="cities_starting_with_a"
+        result_df = (
+            rental_hours_df
+            .groupBy("city_starts_with_a", "city_with_hyphens", "name")
+            .agg(sum("rental_hours").alias("total_rental_hours"))
+            .withColumn("rank", dense_rank().over(ranking_window))
+            .where(col("rank") == 1)
+            .drop("rank")
+            .orderBy("city_starts_with_a", "city_with_hyphens", desc("total_rental_hours"), "name")
         )
 
-        # Cities containing a "-" symbol
-        top_category_by_city_filter(
-            rental_hours_df,
-            col("city").contains("-"),
-            label="cities_with_dash"
-        )
-
+        self.json_inload(result_df)
         rental_hours_df.unpersist()
-

@@ -20,22 +20,20 @@ class SparkTask2(SparkTask):
         inventory_df = self.load_table("inventory").select("inventory_id", "film_id")
         actor_df = self.load_table("actor").select("actor_id", "first_name", "last_name")
         film_actor_df = self.load_table("film_actor").select("actor_id", "film_id")
-        
-        inventory_rental_df = (
+
+        # actor_id | rental_count
+        actor_rental_df = (
             rental_df
             .join(broadcast(inventory_df), on="inventory_id", how="inner")
-            .groupBy("film_id")
+            .join(broadcast(film_actor_df), on="film_id", how="inner")
+            .groupBy("actor_id")
             .agg(count("*").alias("rental_count"))
         )
 
-        film_actor_rental_df = (
-            broadcast(film_actor_df)
-            .join(inventory_rental_df, on="film_id", how="left")
-        )
-
+        # first_name | last_name | rental_count
         actor_rental_df = (
-            broadcast(actor_df)
-            .join(film_actor_rental_df, on="actor_id", how="left")
+            actor_rental_df
+            .join(broadcast(actor_df), on="actor_id", how="left")
             .groupBy("first_name", "last_name")
             .agg(sum("rental_count").alias("rental_count"))
             .orderBy(desc("rental_count"))

@@ -19,8 +19,8 @@ class SparkTask1(SparkTask):
         film_category_df = self.load_table("film_category").select("category_id", "film_id")
 
         result_df = (
-            broadcast(category_df)
-            .join(film_category_df, on="category_id", how="left")
+            film_category_df
+            .join(broadcast(category_df), on="category_id", how="left")
             .groupBy(col("name").alias("category"))
             .agg(count("film_id").alias("movie_count"))
             .orderBy(desc("movie_count"), col("category"))
